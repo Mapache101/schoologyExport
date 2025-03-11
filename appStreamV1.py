@@ -86,44 +86,44 @@ def process_data(df, docente, area, curso, nivel):
     final_general = general_columns_reordered
 
     final_coded_order = []
-    # Iterate over categories in the order defined in CODE_PREFIXES
+    # Iterar sobre categorías en el orden definido en CODE_PREFIXES
     for prefix, category in CODE_PREFIXES.items():
-        # Get all columns belonging to this category
+        # Obtener todas las columnas que pertenecen a esta categoría
         group_info = [d for d in columns_info if d['category'] == category]
         if group_info:
             group_sorted = sorted(group_info, key=lambda x: x['seq_num'])
             group_names = [d['new_name'] for d in group_sorted]
-            # Compute the average column for this category and add it to df_cleaned.
-            # Convert the values to numeric (ignoring non-numeric issues) and calculate the row-wise mean.
+            # Convertir cada columna a numérico y calcular el promedio por fila
             avg_col_name = f"Promedio {category}"
-            df_cleaned[avg_col_name] = pd.to_numeric(df_cleaned[group_names], errors='coerce').mean(axis=1)
-            # Append the group columns and then the average column.
+            numeric_group = df_cleaned[group_names].apply(lambda x: pd.to_numeric(x, errors='coerce'))
+            df_cleaned[avg_col_name] = numeric_group.mean(axis=1)
+            # Agregar las columnas del grupo y luego la columna de promedio
             final_coded_order.extend(group_names)
             final_coded_order.append(avg_col_name)
 
-    # Combine the general and coded (with average) column orders
+    # Combinar el orden final de las columnas: generales + codificadas (con promedio)
     final_order = final_general + final_coded_order
 
-    # Reorder the DataFrame according to final_order.
+    # Reordenar el DataFrame según final_order.
     df_final = df_cleaned[final_order]
 
     # ---------------------------------------------------------------------------
-    # Export to Excel with a header section for teacher info
+    # Exportar a Excel con una sección de encabezado para la info del docente
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Write the DataFrame starting at row 7 (i.e., startrow=6) so that we can add header info above.
+        # Escribir el DataFrame comenzando en la fila 7 (startrow=6) para agregar info de encabezado arriba.
         df_final.to_excel(writer, sheet_name='Sheet1', startrow=6, index=False)
 
-        # Access the workbook and worksheet objects
+        # Acceder a los objetos workbook y worksheet
         workbook = writer.book
         worksheet = writer.sheets['Sheet1']
 
-        # Create formats: one for headers (bold + border, rotated text) and one for regular cells (border only)
+        # Crear formatos: uno para encabezados (negrita + borde, texto rotado) y otro para celdas regulares (sólo borde)
         header_format = workbook.add_format({'bold': True, 'border': 1, 'rotation': 90, 'shrink': True})
         border_format = workbook.add_format({'border': 1})
 
-        # Write teacher info cells with border formatting
+        # Escribir la info del docente con formato de borde
         worksheet.write('A1', 'Docente:', border_format)
         worksheet.write('B1', docente, border_format)
         worksheet.write('A2', 'Area:', border_format)
@@ -133,18 +133,18 @@ def process_data(df, docente, area, curso, nivel):
         worksheet.write('A4', 'Nivel:', border_format)
         worksheet.write('B4', nivel, border_format)
         
-        # Write current date in cell A5 with the format yy-mm-dd
+        # Escribir la fecha actual en la celda A5 con el formato yy-mm-dd
         timestamp = datetime.now().strftime("%y-%m-%d")
         worksheet.write('A5', timestamp, border_format)
 
-        # Re-write the header row (row 6) with bold formatting and borders
+        # Re-escribir la fila de encabezado (fila 6) con formato negrita y bordes
         for col_num, value in enumerate(df_final.columns):
             worksheet.write(6, col_num, value, header_format)
 
-        # Adjust column widths:
-        # - Widen columns containing "nombre" or "apellido"
-        # - Set a slightly wider width for average columns (starting with "Promedio")
-        # - Use a default narrow width for other columns.
+        # Ajustar el ancho de las columnas:
+        # - Ampliar las columnas que contienen "nombre" o "apellido"
+        # - Asignar un ancho mayor para las columnas de promedio (que comienzan con "Promedio")
+        # - Usar un ancho por defecto para el resto.
         for idx, col_name in enumerate(df_final.columns):
             if "nombre" in col_name.lower() or "apellido" in col_name.lower():
                 worksheet.set_column(idx, idx, 25)
@@ -153,7 +153,7 @@ def process_data(df, docente, area, curso, nivel):
             else:
                 worksheet.set_column(idx, idx, 5)
 
-        # Determine the range for the data (including header)
+        # Determinar el rango para los datos (incluyendo encabezado)
         num_rows = df_final.shape[0]
         num_cols = df_final.shape[1]
         data_start_row = 6  
