@@ -150,7 +150,7 @@ def process_data(df, docente, area, curso, nivel):
             elif col_name.startswith("blank_"):
                 worksheet.set_column(idx, idx, 2)   # Narrow column for blank columns
             else:
-                worksheet.set_column(idx, idx, 12)  # Default width for other columns
+                worksheet.set_column(idx, idx, 8)  # Default width for other columns
 
         # Determine the range for the data (including header)
         num_rows = df_final.shape[0]
