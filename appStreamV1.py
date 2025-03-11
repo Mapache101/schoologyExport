@@ -122,7 +122,8 @@ def process_data(df, docente, area, curso, nivel):
         worksheet = writer.sheets['Sheet1']
 
         # Create formats: one for headers (bold + border) and one for regular cells (border only)
-        header_format = workbook.add_format({'bold': True, 'border': 1})
+        #header_format = workbook.add_format({'bold': True, 'border': 1})
+        header_format = workbook.add_format({'bold': True, 'border': 1, 'rotation': 90})
         border_format = workbook.add_format({'border': 1})
 
         # Write teacher info cells with border formatting
