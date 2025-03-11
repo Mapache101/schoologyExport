@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import io
 import xlsxwriter
+from datetime import datetime
 
 # Define code prefixes and their categories
 CODE_PREFIXES = {
@@ -46,6 +47,11 @@ def process_data(df, docente, area, curso, nivel):
             prefix = code[:2]
             seq_num = int(code[2:])
             category = CODE_PREFIXES.get(prefix, 'Other')
+            # Replace any parentheses content with the category, adding an empty space before the category.
+            if re.search(r'\([^)]*\)', new_name):
+                new_name = re.sub(r'\([^)]*\)', f" {category}", new_name).strip()
+            else:
+                new_name = f"{new_name} {category}".strip()
             columns_info.append({
                 'original': col,
                 'new_name': new_name,
@@ -61,7 +67,6 @@ def process_data(df, docente, area, curso, nivel):
     general_columns_reordered = name_columns + other_general
 
     # First, reorder the DataFrame using the original ordering we had
-    # (This ordering does not yet include blank columns)
     sorted_coded = sorted(columns_info, key=lambda x: (list(CODE_PREFIXES.values()).index(x['category']) if x['category'] in CODE_PREFIXES.values() else 999, x['seq_num']))
     new_order = general_columns_reordered + [col['original'] for col in sorted_coded]
 
@@ -90,7 +95,6 @@ def process_data(df, docente, area, curso, nivel):
     for i, group in enumerate(groups):
         final_coded_order.extend(group)
         if i < len(groups) - 1:
-            # Use a unique dummy column name; later we will fill it with empty values
             blank_col_name = f"blank_{i}"
             final_coded_order.append(blank_col_name)
 
@@ -113,49 +117,80 @@ def process_data(df, docente, area, curso, nivel):
         # Write the DataFrame starting at row 7 (i.e., startrow=6) so that we can add header info above.
         df_final.to_excel(writer, sheet_name='Sheet1', startrow=6, index=False)
 
-        # Access the worksheet to add header information in specific cells.
+        # Access the workbook and worksheet objects
+        workbook = writer.book
         worksheet = writer.sheets['Sheet1']
-        worksheet.write('A1', 'Docente:')
-        worksheet.write('B1', docente)
-        worksheet.write('A2', 'Area:')
-        worksheet.write('B2', area)
-        worksheet.write('A3', 'Curso:')
-        worksheet.write('B3', curso)
-        worksheet.write('A4', 'Nivel:')
-        worksheet.write('B4', nivel)
 
-        # Optionally, you can adjust the column width for blank columns (or hide headers)
-        # For instance, set a narrow width for columns whose header starts with "blank_"
+        # Create formats: one for headers (bold + border) and one for regular cells (border only)
+        header_format = workbook.add_format({'bold': True, 'border': 1})
+        border_format = workbook.add_format({'border': 1})
+
+        # Write teacher info cells with border formatting
+        worksheet.write('A1', 'Docente:', border_format)
+        worksheet.write('B1', docente, border_format)
+        worksheet.write('A2', 'Area:', border_format)
+        worksheet.write('B2', area, border_format)
+        worksheet.write('A3', 'Curso:', border_format)
+        worksheet.write('B3', curso, border_format)
+        worksheet.write('A4', 'Nivel:', border_format)
+        worksheet.write('B4', nivel, border_format)
+        
+        # Write current date in cell A5 with the format yy-mm-dd
+        timestamp = datetime.now().strftime("%y-%m-%d")
+        worksheet.write('A5', timestamp, border_format)
+
+        # Re-write the header row (row 6) with bold formatting and borders
+        for col_num, value in enumerate(df_final.columns):
+            worksheet.write(6, col_num, value, header_format)
+
+        # Adjust column widths: widen columns with "nombre" or "apellido"
         for idx, col_name in enumerate(df_final.columns):
-            if col_name.startswith("blank_"):
-                worksheet.set_column(idx, idx, 2)  # Narrow column for visual separation
+            if "nombre" in col_name.lower() or "apellido" in col_name.lower():
+                worksheet.set_column(idx, idx, 25)  # Set a wider width for name columns
+            elif col_name.startswith("blank_"):
+                worksheet.set_column(idx, idx, 2)   # Narrow column for blank columns
+            else:
+                worksheet.set_column(idx, idx, 12)  # Default width for other columns
+
+        # Determine the range for the data (including header)
+        num_rows = df_final.shape[0]
+        num_cols = df_final.shape[1]
+        # Data starts at row 6 (header) and ends at row 6 + number of data rows
+        data_start_row = 6  
+        data_end_row = 6 + num_rows  
+        # Apply a conditional format with a formula that always evaluates to TRUE to add borders to all cells
+        worksheet.conditional_format(data_start_row, 0, data_end_row, num_cols - 1, {
+            'type': 'formula',
+            'criteria': '=TRUE',
+            'format': border_format
+        })
 
     output.seek(0)
     return output
 
 def main():
-    st.title("Gradebook Cleaner")
+    st.title("Griffin's CSV a Excel v.042")
 
-    docente = st.text_input("Enter the name of Docente (e.g., Daniel Olguin):")
-    area = st.text_input("Enter the area:")
-    curso = st.text_input("Enter the curso:")
-    nivel = st.text_input("Enter the nivel:")
+    docente = st.text_input("Escriba el nombre del docente:")
+    area = st.text_input("Escriba el área:")
+    curso = st.text_input("Escriba el curso:")
+    nivel = st.text_input("Escriba el nivel:")
 
-    uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
+    uploaded_file = st.file_uploader("Subir archivo CSV", type=["csv"])
 
     if uploaded_file is not None:
         try:
             df = pd.read_csv(uploaded_file)
             output_excel = process_data(df, docente, area, curso, nivel)
             st.download_button(
-                label="Download Cleaned Gradebook (Excel)",
+                label="Descargar Gradebook organizado (Excel)",
                 data=output_excel,
                 file_name="final_cleaned_gradebook.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.success("Processing complete!")
+            st.success("Procesamiento completado!")
         except Exception as e:
-            st.error(f"An error occurred: {e}")
+            st.error(f"Ha ocurrido un error: {e}")
 
 if __name__ == "__main__":
     main()
