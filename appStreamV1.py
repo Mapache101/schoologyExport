@@ -66,8 +66,12 @@ def process_data(df, docente, area, curso, nivel):
     other_general = [col for col in general_columns if col not in name_columns]
     general_columns_reordered = name_columns + other_general
 
-    # First, reorder the DataFrame using the original ordering we had
-    sorted_coded = sorted(columns_info, key=lambda x: (list(CODE_PREFIXES.values()).index(x['category']) if x['category'] in CODE_PREFIXES.values() else 999, x['seq_num']))
+    # First, sort the coded columns based on the order of categories defined in CODE_PREFIXES and their sequence number
+    sorted_coded = sorted(
+        columns_info,
+        key=lambda x: (list(CODE_PREFIXES.values()).index(x['category']) if x['category'] in CODE_PREFIXES.values() else 999, x['seq_num'])
+    )
+    # Initial ordering: general columns followed by the original names of coded columns.
     new_order = general_columns_reordered + [col['original'] for col in sorted_coded]
 
     # Create a cleaned DataFrame and rename coded columns
@@ -76,35 +80,29 @@ def process_data(df, docente, area, curso, nivel):
     df_cleaned.rename(columns=rename_dict, inplace=True)
 
     # ---------------------------------------------------------------------------
-    # Build final ordering for the Excel output with an empty column between coded groups
+    # Build final ordering for the Excel output with average columns after each category group
 
     # The general columns remain in the front.
     final_general = general_columns_reordered
 
-    # Create groups for coded columns based on CODE_PREFIXES order.
-    groups = []
-    for prefix, category in CODE_PREFIXES.items():
-        group = [d for d in columns_info if d['category'] == category]
-        group_sorted = sorted(group, key=lambda x: x['seq_num'])
-        group_names = [d['new_name'] for d in group_sorted]
-        if group_names:
-            groups.append(group_names)
-
-    # Combine groups with an extra "blank" column inserted between each (except after the last)
     final_coded_order = []
-    for i, group in enumerate(groups):
-        final_coded_order.extend(group)
-        if i < len(groups) - 1:
-            blank_col_name = f"blank_{i}"
-            final_coded_order.append(blank_col_name)
+    # Iterate over categories in the order defined in CODE_PREFIXES
+    for prefix, category in CODE_PREFIXES.items():
+        # Get all columns belonging to this category
+        group_info = [d for d in columns_info if d['category'] == category]
+        if group_info:
+            group_sorted = sorted(group_info, key=lambda x: x['seq_num'])
+            group_names = [d['new_name'] for d in group_sorted]
+            # Compute the average column for this category and add it to df_cleaned.
+            # Convert the values to numeric (ignoring non-numeric issues) and calculate the row-wise mean.
+            avg_col_name = f"Promedio {category}"
+            df_cleaned[avg_col_name] = pd.to_numeric(df_cleaned[group_names], errors='coerce').mean(axis=1)
+            # Append the group columns and then the average column.
+            final_coded_order.extend(group_names)
+            final_coded_order.append(avg_col_name)
 
-    # Combine the final general and coded column orders
+    # Combine the general and coded (with average) column orders
     final_order = final_general + final_coded_order
-
-    # Insert the blank columns (if not already present) with empty values.
-    for col in final_order:
-        if col.startswith("blank_") and col not in df_cleaned.columns:
-            df_cleaned[col] = ""
 
     # Reorder the DataFrame according to final_order.
     df_final = df_cleaned[final_order]
@@ -121,8 +119,7 @@ def process_data(df, docente, area, curso, nivel):
         workbook = writer.book
         worksheet = writer.sheets['Sheet1']
 
-        # Create formats: one for headers (bold + border) and one for regular cells (border only)
-        #header_format = workbook.add_format({'bold': True, 'border': 1})
+        # Create formats: one for headers (bold + border, rotated text) and one for regular cells (border only)
         header_format = workbook.add_format({'bold': True, 'border': 1, 'rotation': 90, 'shrink': True})
         border_format = workbook.add_format({'border': 1})
 
@@ -144,22 +141,23 @@ def process_data(df, docente, area, curso, nivel):
         for col_num, value in enumerate(df_final.columns):
             worksheet.write(6, col_num, value, header_format)
 
-        # Adjust column widths: widen columns with "nombre" or "apellido"
+        # Adjust column widths:
+        # - Widen columns containing "nombre" or "apellido"
+        # - Set a slightly wider width for average columns (starting with "Promedio")
+        # - Use a default narrow width for other columns.
         for idx, col_name in enumerate(df_final.columns):
             if "nombre" in col_name.lower() or "apellido" in col_name.lower():
-                worksheet.set_column(idx, idx, 25)  # Set a wider width for name columns
-            elif col_name.startswith("blank_"):
-                worksheet.set_column(idx, idx, 2)   # Narrow column for blank columns
+                worksheet.set_column(idx, idx, 25)
+            elif col_name.lower().startswith("promedio"):
+                worksheet.set_column(idx, idx, 7)
             else:
-                worksheet.set_column(idx, idx, 5)  # Default width for other columns
+                worksheet.set_column(idx, idx, 5)
 
         # Determine the range for the data (including header)
         num_rows = df_final.shape[0]
         num_cols = df_final.shape[1]
-        # Data starts at row 6 (header) and ends at row 6 + number of data rows
         data_start_row = 6  
         data_end_row = 6 + num_rows  
-        # Apply a conditional format with a formula that always evaluates to TRUE to add borders to all cells
         worksheet.conditional_format(data_start_row, 0, data_end_row, num_cols - 1, {
             'type': 'formula',
             'criteria': '=TRUE',
