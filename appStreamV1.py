@@ -5,11 +5,11 @@ import io
 import xlsxwriter
 from datetime import datetime
 
-def process_data(df, teacher, subject, course, level, language):
+def process_data(df, teacher, subject, course, level):
     # Updated list of columns to drop from the CSV (if present)
     columns_to_drop = [
         "Nombre de usuario",
-        "Username",        
+        "Username",
         "Promedio General",
         "Term1 - 2024",
         "Term1 - 2024 - AUTO EVAL TO BE_SER - Puntuación de categoría",
@@ -25,13 +25,13 @@ def process_data(df, teacher, subject, course, level, language):
         "Term3 - 2025"
     ]
     df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
-    
+
     # Define phrases that indicate the column should be excluded from the final output.
     exclusion_phrases = ["(Count in Grade)", "Category Score", "Ungraded"]
-    
+
     # Process columns: separate those with a grading category (coded) from general ones.
-    columns_info = []  # List for columns that include "Grading Category:"
-    general_columns = []  # All other columns
+    columns_info =# List for columns that include "Grading Category:"
+    general_columns =# All other columns
     columns_to_remove = {"ID de usuario único", "ID de usuario unico"}
 
     for i, col in enumerate(df.columns):
@@ -60,12 +60,9 @@ def process_data(df, teacher, subject, course, level, language):
             })
         else:
             general_columns.append(col)
-    
+
     # Reorder general columns so that name-related columns appear first.
-    if language == "Español":
-        name_terms = ["nombre", "apellido"]
-    else:
-        name_terms = ["name", "first", "last"]
+    name_terms = ["name", "first", "last"]
     name_columns = [col for col in general_columns if any(term in col.lower() for term in name_terms)]
     other_general = [col for col in general_columns if col not in name_columns]
     general_columns_reordered = name_columns + other_general
@@ -82,17 +79,17 @@ def process_data(df, teacher, subject, course, level, language):
     # Group the coded columns by the extracted grading category.
     groups = {}
     for d in columns_info:
-        groups.setdefault(d['category'], []).append(d)
+        groups.setdefault(d['category'],).append(d)
     # Order groups by the first appearance of any column in that group.
     group_order = sorted(groups.keys(), key=lambda cat: min(d['seq_num'] for d in groups[cat]))
 
-    final_coded_order = []
+    final_coded_order =
     # For each group, sort columns by their original order and calculate an average column.
     for cat in group_order:
         group_sorted = sorted(groups[cat], key=lambda x: x['seq_num'])
         group_names = [d['new_name'] for d in group_sorted]
         # Define the average column name in the appropriate language.
-        avg_col_name = f"Promedio {cat}" if language == "Español" else f"Average {cat}"
+        avg_col_name = f"Average {cat}"
         # Convert the group columns to numeric (coercing errors) and compute the row-wise mean.
         numeric_group = df_cleaned[group_names].apply(lambda x: pd.to_numeric(x, errors='coerce'))
         # Round the average to whole numbers
@@ -100,7 +97,7 @@ def process_data(df, teacher, subject, course, level, language):
         # Append group columns and then the average column.
         final_coded_order.extend(group_names)
         final_coded_order.append(avg_col_name)
-    
+
     # Final order: general columns followed by the grouped columns (each with its average).
     final_order = general_columns_reordered + final_coded_order
     df_final = df_cleaned[final_order]
@@ -113,12 +110,12 @@ def process_data(df, teacher, subject, course, level, language):
         "TO DO_HACER": 0.40,
         "TO KNOW_SABER": 0.45
     }
-    
+
     final_grade = pd.Series(0.0, index=df_final.index)
-    final_grade_col = "Calificación Final" if language == "Español" else "Final Grade"
+    final_grade_col = "Final Grade"
 
     for category, weight in weights.items():
-        avg_col = f"Promedio {category}" if language == "Español" else f"Average {category}"
+        avg_col = f"Average {category}"
         if avg_col in df_final.columns:
             final_grade += df_final[avg_col] * weight
 
@@ -129,23 +126,23 @@ def process_data(df, teacher, subject, course, level, language):
 
     # Export to Excel with formatting
     output = io.BytesIO()
-    
+
     # Add nan_inf_to_errors option to handle NaN/INF values
     with pd.ExcelWriter(
-        output, 
-        engine='xlsxwriter', 
+        output,
+        engine='xlsxwriter',
         engine_kwargs={'options': {'nan_inf_to_errors': True}}
     ) as writer:
         # Convert NaN values to empty strings before writing to Excel
         df_final_filled = df_final.fillna('')
         df_final_filled.to_excel(writer, sheet_name='Sheet1', startrow=6, index=False)
-        
+
         workbook = writer.book
         worksheet = writer.sheets['Sheet1']
 
         # Create new formats
         header_format = workbook.add_format({
-            'bold': True, 
+            'bold': True,
             'border': 1,
             'rotation': 90,
             'shrink': True
@@ -168,16 +165,10 @@ def process_data(df, teacher, subject, course, level, language):
         border_format = workbook.add_format({'border': 1})
 
         # Set header labels based on language.
-        if language == "Español":
-            teacher_label = "Docente:"
-            subject_label = "Área:"
-            course_label = "Curso:"
-            level_label = "Nivel:"
-        else:
-            teacher_label = "Teacher:"
-            subject_label = "Subject:"
-            course_label = "Class:"
-            level_label = "Level:"
+        teacher_label = "Teacher:"
+        subject_label = "Subject:"
+        course_label = "Class:"
+        level_label = "Level:"
 
         worksheet.write('A1', teacher_label, border_format)
         worksheet.write('B1', teacher, border_format)
@@ -192,7 +183,7 @@ def process_data(df, teacher, subject, course, level, language):
 
         # Write headers with appropriate formatting
         for col_num, value in enumerate(df_final.columns):
-            if value.startswith(("Promedio ", "Average ")):  # Space important to avoid false matches
+            if value.startswith("Average "):  # Space important to avoid false matches
                 worksheet.write(6, col_num, value, avg_header_format)
             elif value == final_grade_col:
                 worksheet.write(6, col_num, value, final_grade_format)
@@ -200,9 +191,9 @@ def process_data(df, teacher, subject, course, level, language):
                 worksheet.write(6, col_num, value, header_format)
 
         # Apply formatting to data cells
-        average_columns = [col for col in df_final.columns 
-                         if col.startswith(("Promedio ", "Average "))]  # Space important
-        
+        average_columns = [col for col in df_final.columns
+                           if col.startswith("Average ")]  # Space important
+
         for col_name in df_final.columns:
             col_idx = df_final.columns.get_loc(col_name)
             for row_idx in range(7, 7 + len(df_final)):
@@ -215,11 +206,11 @@ def process_data(df, teacher, subject, course, level, language):
                     worksheet.write(row_idx, col_idx, value, border_format)
 
         # Adjust column widths.
-        final_grade_col_name = "Calificación Final" if language == "Español" else "Final Grade"
+        final_grade_col_name = "Final Grade"
         for idx, col_name in enumerate(df_final.columns):
             if any(term in col_name.lower() for term in name_terms):
                 worksheet.set_column(idx, idx, 25)
-            elif (language == "Español" and col_name.startswith("Promedio")) or (language == "English" and col_name.startswith("Average")):
+            elif col_name.startswith("Average"):
                 worksheet.set_column(idx, idx, 7)
             elif col_name == final_grade_col_name:
                 worksheet.set_column(idx, idx, 12)  # Wider column for final grade
@@ -240,32 +231,20 @@ def process_data(df, teacher, subject, course, level, language):
 
 def main():
     st.title("Griffin CSV to Excel")
-    language = st.selectbox("Select language / Seleccione idioma", ["English", "Español"])
 
-    # Display input fields with language-specific labels.
-    if language == "Español":
-        teacher = st.text_input("Escriba el nombre del docente:")
-        subject = st.text_input("Escriba el área:")
-        course = st.text_input("Escriba el curso:")
-        level = st.text_input("Escriba el nivel:")
-        uploaded_file = st.file_uploader("Subir archivo CSV", type=["csv"])
-    else:
-        teacher = st.text_input("Enter teacher's name:")
-        subject = st.text_input("Enter subject area:")
-        course = st.text_input("Enter class:")
-        level = st.text_input("Enter level:")
-        uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
+    # Display input fields with English labels.
+    teacher = st.text_input("Enter teacher's name:")
+    subject = st.text_input("Enter subject area:")
+    course = st.text_input("Enter class:")
+    level = st.text_input("Enter level:")
+    uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
     if uploaded_file is not None:
         try:
             df = pd.read_csv(uploaded_file)
-            output_excel = process_data(df, teacher, subject, course, level, language)
-            if language == "Español":
-                download_label = "Descargar Gradebook organizado (Excel)"
-                success_msg = "Procesamiento completado!"
-            else:
-                download_label = "Download Organized Gradebook (Excel)"
-                success_msg = "Processing completed!"
+            output_excel = process_data(df, teacher, subject, course, level)
+            download_label = "Download Organized Gradebook (Excel)"
+            success_msg = "Processing completed!"
             st.download_button(
                 label=download_label,
                 data=output_excel,
@@ -274,7 +253,7 @@ def main():
             )
             st.success(success_msg)
         except Exception as e:
-            error_msg = f"Ha ocurrido un error: {e}" if language == "Español" else f"An error occurred: {e}"
+            error_msg = f"An error occurred: {e}"
             st.error(error_msg)
 
 if __name__ == "__main__":
