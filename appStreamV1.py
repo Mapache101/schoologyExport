@@ -31,12 +31,11 @@ def process_trimester_data(df, writer, trimester, teacher, subject, course, leve
         trimester_prefix = f"Term{trimester}"
         general_columns = ["First Name", "Last Name", "Unique User ID"]
 
-        # Find columns relevant to this trimester and category
-        # Pattern to match columns for the current trimester, ignoring count columns
-        trimester_cols_pattern = re.compile(rf'^{trimester_prefix} - .*\(Max Points:.*Grading Category:.*')
-        
+        # List for columns that include "Grading Category:"
         columns_info = []
         for i, col in enumerate(df.columns):
+            # Pattern to match columns for the current trimester, ignoring count columns
+            trimester_cols_pattern = re.compile(rf'^{trimester_prefix} - .*\(Max Points:.*Grading Category:.*')
             if trimester_cols_pattern.match(col):
                 # Use a more robust regex to extract category and max points
                 m_cat = re.search(r'Grading Category:\s*([^,)]+)', col)
