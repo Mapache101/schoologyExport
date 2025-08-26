@@ -25,24 +25,28 @@ def custom_round(value):
 def process_trimester_data(df, writer, trimester, teacher, subject, course, level):
     """
     Processes and formats data for a single trimester and writes it to an Excel sheet.
+    
+    This function takes a pre-sliced DataFrame containing only the data for a single trimester.
+    It calculates category averages and final grades, then formats and writes the result to an
+    Excel worksheet.
     """
     try:
         # Columns to keep for this specific trimester
-        trimester_prefix = f"Term{trimester}"
         general_columns = ["First Name", "Last Name", "Unique User ID"]
 
-        # List for columns that include "Grading Category:"
+        # Find columns that are not part of general information and not "Count in Grade"
+        non_grade_columns = ["(Count in Grade)", "Category Score"]
+        grade_columns = [col for col in df.columns if not any(ngc in col for ngc in non_grade_columns)]
+
+        # Find all columns that have "Grading Category" in their name
         columns_info = []
         for i, col in enumerate(df.columns):
-            # Pattern to match columns for the current trimester, ignoring count columns
-            trimester_cols_pattern = re.compile(rf'^{trimester_prefix} - .*\(Max Points:.*Grading Category:.*')
-            if trimester_cols_pattern.match(col):
-                # Use a more robust regex to extract category and max points
-                m_cat = re.search(r'Grading Category:\s*([^,)]+)', col)
+            if "Grading Category:" in str(col):
+                m_cat = re.search(r'Grading Category:\s*([^,)]+)', str(col))
                 category = m_cat.group(1).strip() if m_cat else "Unknown"
-                m_pts = re.search(r'Max Points:\s*([\d\.]+)', col)
+                m_pts = re.search(r'Max Points:\s*([\d\.]+)', str(col))
                 max_pts = float(m_pts.group(1)) if m_pts else None
-                base_name = col.split('(')[0].strip()
+                base_name = str(col).split('(')[0].strip()
                 new_name = f"{base_name} ({category})".strip()
                 columns_info.append({
                     'original': col,
@@ -193,16 +197,39 @@ def process_all_trimesters(df, teacher, subject, course, level):
     output = io.BytesIO()
     
     with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'nan_inf_to_errors': True}}) as writer:
-        # Find all unique trimester numbers in the columns
-        trimester_numbers = sorted(list(set(re.findall(r'Term(\d+)\s-', " ".join(df.columns)))))
+        
+        # Identify the boundary columns that separate trimesters
+        boundary_cols = {col: i for i, col in enumerate(df.columns) if re.search(r'Term\d+\s-\s\d+\s-\sCategory Score', col)}
+        
+        # Get the unique trimester numbers from the boundary columns
+        trimester_numbers = sorted(list(set(re.findall(r'Term(\d+)', " ".join(boundary_cols.keys())))))
         
         if not trimester_numbers:
             st.error("Could not find any trimester data in the uploaded file.")
             return None
-            
-        for trimester in trimester_numbers:
+
+        # Determine the start and end indices for each trimester
+        trimester_slices = {}
+        sorted_boundaries = sorted(boundary_cols.items(), key=lambda item: item[1])
+        
+        for i, (col, idx) in enumerate(sorted_boundaries):
+            trimester = re.search(r'Term(\d+)', col).group(1)
+            start_index = idx + 1
+            end_index = sorted_boundaries[i+1][1] if i + 1 < len(sorted_boundaries) else len(df.columns)
+            trimester_slices[trimester] = (start_index, end_index)
+
+        # Separate the general information columns
+        general_columns = ["First Name", "Last Name", "Unique User ID"]
+
+        # Process each trimester slice and write to a new sheet
+        for trimester, (start_idx, end_idx) in trimester_slices.items():
             st.info(f"Processing data for Trimester {trimester}...")
-            process_trimester_data(df, writer, trimester, teacher, subject, course, level)
+            
+            # Slice the DataFrame to get only the columns for the current trimester
+            trimester_cols = df.iloc[:, start_idx:end_idx].columns.tolist()
+            trimester_df = df[general_columns + trimester_cols]
+            
+            process_trimester_data(trimester_df, writer, trimester, teacher, subject, course, level)
             
     return output
 
