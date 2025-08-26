@@ -4,257 +4,238 @@ import re
 import io
 import xlsxwriter
 from datetime import datetime
+import math
 
-def process_data(df, teacher, subject, course, level):
-    # Updated list of columns to drop from the CSV (if present)
-    columns_to_drop = [
-        "Nombre de usuario",
-        "Username",
-        "Promedio General",
-        "Term1 - 2024",
-        "Term1 - 2024 - AUTO EVAL TO BE_SER - Puntuación de categoría",
-        "Term1 - 2024 - TO BE_SER - Puntuación de categoría",
-        "Term1 - 2024 - TO DECIDE_DECIDIR - Puntuación de categoría",
-        "Term1 - 2024 - TO DO_HACER - Puntuación de categoría",
-        "Term1 - 2024 - TO KNOW_SABER - Puntuación de categoría",
-        "Unique User ID",
-        "Overall",
-        "2025",
-        "Term1 - 2025",
-        "Term2- 2025",
-        "Term3 - 2025"
-    ]
-    df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
+# Define weights for categories
+# NOTE: Ensure these weights match the categories in your gradebook.
+weights = {
+    "TO BE_SER": 0.05,
+    "TO DECIDE_DECIDIR": 0.05,
+    "TO DO_HACER": 0.40,
+    "TO KNOW_SABER": 0.45,
+    "AUTO EVAL": 0.05
+}
 
-    # Define phrases that indicate the column should be excluded from the final output.
-    exclusion_phrases = ["(Count in Grade)", "Category Score", "Ungraded"]
+def custom_round(value):
+    """
+    Rounds a number to the nearest integer.
+    """
+    return math.floor(value + 0.5)
 
-    # Process columns: separate those with a grading category (coded) from general ones.
-    columns_info =# List for columns that include "Grading Category:"
-    general_columns =# All other columns
-    columns_to_remove = {"ID de usuario único", "ID de usuario unico"}
+def process_trimester_data(df, writer, trimester, teacher, subject, course, level):
+    """
+    Processes and formats data for a single trimester and writes it to an Excel sheet.
+    """
+    try:
+        # Columns to keep for this specific trimester
+        trimester_prefix = f"Term{trimester}"
+        general_columns = ["First Name", "Last Name", "Unique User ID"]
 
-    for i, col in enumerate(df.columns):
-        if col in columns_to_remove:
-            continue
-        # Skip columns with any exclusion phrase.
-        if any(phrase in col for phrase in exclusion_phrases):
-            continue
+        # Find columns relevant to this trimester and category
+        # Pattern to match columns for the current trimester, ignoring count columns
+        trimester_cols_pattern = re.compile(rf'^{trimester_prefix} - .*\(Max Points:.*Grading Category:.*')
+        
+        columns_info = []
+        for i, col in enumerate(df.columns):
+            if trimester_cols_pattern.match(col):
+                # Use a more robust regex to extract category and max points
+                m_cat = re.search(r'Grading Category:\s*([^,)]+)', col)
+                category = m_cat.group(1).strip() if m_cat else "Unknown"
+                m_pts = re.search(r'Max Points:\s*([\d\.]+)', col)
+                max_pts = float(m_pts.group(1)) if m_pts else None
+                base_name = col.split('(')[0].strip()
+                new_name = f"{base_name} ({category})".strip()
+                columns_info.append({
+                    'original': col,
+                    'new_name': new_name,
+                    'category': category,
+                    'seq_num': i,
+                    'max_points': max_pts
+                })
 
-        # Check if the column header contains "Grading Category:" and process accordingly.
-        if "Grading Category:" in col:
-            # Extract the category using a regular expression.
-            m = re.search(r'Grading Category:\s*([^,)]+)', col)
-            if m:
-                category = m.group(1).strip()
+        # Separate and reorder columns
+        df_cleaned = df.copy()
+        
+        # Filter for the relevant columns and rename them
+        trimester_cols = [d['original'] for d in columns_info]
+        df_trimester = df_cleaned[general_columns + trimester_cols].copy()
+        df_trimester.rename({d['original']: d['new_name'] for d in columns_info}, axis=1, inplace=True)
+
+        # Handle "Missing" values and convert to numeric
+        df_trimester.replace("Missing", pd.NA, inplace=True)
+        for d in columns_info:
+            df_trimester[d['new_name']] = pd.to_numeric(df_trimester[d['new_name']], errors='coerce')
+
+        final_coded_cols = []
+        # Group columns by category and calculate weighted averages
+        groups = {}
+        for d in columns_info:
+            groups.setdefault(d['category'], []).append(d)
+        
+        group_order = sorted(groups, key=lambda cat: min(d['seq_num'] for d in groups[cat]))
+        
+        for cat in group_order:
+            grp = sorted(groups[cat], key=lambda x: x['seq_num'])
+            names = [d['new_name'] for d in grp]
+            
+            # Calculate earned and possible points
+            earned_points = df_trimester[names].copy()
+            max_points_df = pd.DataFrame(index=df_trimester.index)
+            
+            for d in grp:
+                col = d['new_name']
+                max_pts = d['max_points']
+                max_points_df[col] = earned_points[col].notna().astype(float) * max_pts
+                
+            sum_earned = earned_points.sum(axis=1, skipna=True)
+            sum_possible = max_points_df.sum(axis=1, skipna=True)
+            
+            # Calculate raw average and apply weight
+            raw_avg = (sum_earned / sum_possible) * 100
+            raw_avg.fillna(0, inplace=True)
+            
+            weight = weights.get(cat, None)
+            
+            if weight is None:
+                st.warning(f"Warning: No weight found for category '{cat}' in Trimester {trimester}.")
+                weighted_avg = raw_avg
             else:
-                category = "Unknown"
-            # Use the text before any parenthesis as the base name.
-            base_name = col.split('(')[0].strip()
-            new_name = f"{base_name} {category}".strip()
-            columns_info.append({
-                'original': col,
-                'new_name': new_name,
-                'category': category,
-                'seq_num': i
-            })
-        else:
-            general_columns.append(col)
+                weighted_avg = raw_avg * weight
 
-    # Reorder general columns so that name-related columns appear first.
-    name_terms = ["name", "first", "last"]
-    name_columns = [col for col in general_columns if any(term in col.lower() for term in name_terms)]
-    other_general = [col for col in general_columns if col not in name_columns]
-    general_columns_reordered = name_columns + other_general
+            avg_col = f"Average {cat}"
+            df_trimester[avg_col] = weighted_avg
+            final_coded_cols.extend(names + [avg_col])
 
-    # Order the coded columns by their original order.
-    sorted_coded = sorted(columns_info, key=lambda x: x['seq_num'])
-    new_order = general_columns_reordered + [d['original'] for d in sorted_coded]
+        # Compute the final grade
+        def compute_final_grade(row):
+            total = 0
+            valid = False
+            for col in row.index:
+                if col.startswith("Average "):
+                    val = row[col]
+                    if pd.notna(val):
+                        total += val
+                        valid = True
+            return custom_round(total) if valid else pd.NA
 
-    # Create a cleaned DataFrame and rename the coded columns.
-    df_cleaned = df[new_order].copy()
-    rename_dict = {d['original']: d['new_name'] for d in columns_info}
-    df_cleaned.rename(columns=rename_dict, inplace=True)
+        df_trimester["Final Grade"] = df_trimester.apply(compute_final_grade, axis=1)
 
-    # Group the coded columns by the extracted grading category.
-    groups = {}
-    for d in columns_info:
-        groups.setdefault(d['category'],).append(d)
-    # Order groups by the first appearance of any column in that group.
-    group_order = sorted(groups.keys(), key=lambda cat: min(d['seq_num'] for d in groups[cat]))
+        # Reorder the final DataFrame
+        final_order = general_columns + final_coded_cols + ["Final Grade"]
+        df_final = df_trimester[final_order]
 
-    final_coded_order =
-    # For each group, sort columns by their original order and calculate an average column.
-    for cat in group_order:
-        group_sorted = sorted(groups[cat], key=lambda x: x['seq_num'])
-        group_names = [d['new_name'] for d in group_sorted]
-        # Define the average column name in the appropriate language.
-        avg_col_name = f"Average {cat}"
-        # Convert the group columns to numeric (coercing errors) and compute the row-wise mean.
-        numeric_group = df_cleaned[group_names].apply(lambda x: pd.to_numeric(x, errors='coerce'))
-        # Round the average to whole numbers
-        df_cleaned[avg_col_name] = numeric_group.mean(axis=1).round(0)
-        # Append group columns and then the average column.
-        final_coded_order.extend(group_names)
-        final_coded_order.append(avg_col_name)
+        # Write to the Excel writer object
+        df_final.to_excel(writer, f'Trimester {trimester}', startrow=6, index=False)
+        wb = writer.book
+        ws = writer.sheets[f'Trimester {trimester}']
 
-    # Final order: general columns followed by the grouped columns (each with its average).
-    final_order = general_columns_reordered + final_coded_order
-    df_final = df_cleaned[final_order]
+        # Define formats
+        header_fmt = wb.add_format({
+            'bold': True, 'border': 1, 'rotation': 90,
+            'shrink': True, 'text_wrap': True
+        })
+        avg_hdr = wb.add_format({
+            'bold': True, 'border': 1, 'rotation': 90,
+            'shrink': True, 'text_wrap': True, 'bg_color': '#ADD8E6'
+        })
+        avg_data = wb.add_format({
+            'border': 1, 'bg_color': '#ADD8E6', 'num_format': '0'
+        })
+        final_fmt = wb.add_format({
+            'bold': True, 'border': 1, 'bg_color': '#90EE90', 'num_format': '0'
+        })
+        b_fmt = wb.add_format({'border': 1})
 
-    # Add final grade calculation
-    weights = {
-        "Auto eval": 0.05,
-        "TO BE_SER": 0.05,
-        "TO DECIDE_DECIDIR": 0.05,
-        "TO DO_HACER": 0.40,
-        "TO KNOW_SABER": 0.45
-    }
+        # Write metadata headers
+        ws.write('A1', "Teacher:", b_fmt); ws.write('B1', teacher, b_fmt)
+        ws.write('A2', "Subject:", b_fmt); ws.write('B2', subject, b_fmt)
+        ws.write('A3', "Class:", b_fmt);   ws.write('B3', course, b_fmt)
+        ws.write('A4', "Level:", b_fmt);   ws.write('B4', level, b_fmt)
+        ws.write('A5', datetime.now().strftime("%y-%m-%d"), b_fmt)
+        ws.write('C1', "Trimester:", b_fmt); ws.write('D1', trimester, b_fmt)
 
-    final_grade = pd.Series(0.0, index=df_final.index)
-    final_grade_col = "Final Grade"
+        # Write column headers
+        for idx, col in enumerate(df_final.columns):
+            fmt = header_fmt
+            if col.startswith("Average "):
+                fmt = avg_hdr
+            elif col == "Final Grade":
+                fmt = final_fmt
+            ws.write(6, idx, col, fmt)
+            
+        # Write data rows
+        avg_cols = {c for c in df_final.columns if c.startswith("Average ")}
+        for col_idx, col in enumerate(df_final.columns):
+            fmt = avg_data if col in avg_cols else final_fmt if col == "Final Grade" else b_fmt
+            for row_offset in range(len(df_final)):
+                val = df_final.iloc[row_offset, col_idx]
+                excel_row = 7 + row_offset
+                ws.write(excel_row, col_idx, "" if pd.isna(val) else val, fmt)
 
-    for category, weight in weights.items():
-        avg_col = f"Average {category}"
-        if avg_col in df_final.columns:
-            final_grade += df_final[avg_col] * weight
+        # Set column widths
+        name_terms = ["name", "first", "last"]
+        for idx, col in enumerate(df_final.columns):
+            if any(t in col.lower() for t in name_terms):
+                ws.set_column(idx, idx, 25)
+            elif col.startswith("Average "):
+                ws.set_column(idx, idx, 7)
+            elif col == "Final Grade":
+                ws.set_column(idx, idx, 12)
+            else:
+                ws.set_column(idx, idx, 10)
+    
+    except Exception as e:
+        st.error(f"An error occurred while processing Trimester {trimester}: {e}")
 
-    df_final[final_grade_col] = final_grade.round(2)
-
-    # Replace any occurrence of "Missing" with an empty cell.
-    df_final.replace("Missing", "", inplace=True)
-
-    # Export to Excel with formatting
+def process_all_trimesters(df, teacher, subject, course, level):
+    """
+    Main function to process all trimesters and create a multi-sheet Excel file.
+    """
     output = io.BytesIO()
-
-    # Add nan_inf_to_errors option to handle NaN/INF values
-    with pd.ExcelWriter(
-        output,
-        engine='xlsxwriter',
-        engine_kwargs={'options': {'nan_inf_to_errors': True}}
-    ) as writer:
-        # Convert NaN values to empty strings before writing to Excel
-        df_final_filled = df_final.fillna('')
-        df_final_filled.to_excel(writer, sheet_name='Sheet1', startrow=6, index=False)
-
-        workbook = writer.book
-        worksheet = writer.sheets['Sheet1']
-
-        # Create new formats
-        header_format = workbook.add_format({
-            'bold': True,
-            'border': 1,
-            'rotation': 90,
-            'shrink': True
-        })
-        avg_header_format = workbook.add_format({
-            'bold': True,
-            'border': 1,
-            'rotation': 90,
-            'shrink': True,
-            'bg_color': '#ADD8E6'  # Light blue
-        })
-        avg_data_format = workbook.add_format({
-            'border': 1,
-            'bg_color': '#ADD8E6'
-        })
-        final_grade_format = workbook.add_format({
-            'border': 1,
-            'bg_color': '#90EE90'  # Light green
-        })
-        border_format = workbook.add_format({'border': 1})
-
-        # Set header labels based on language.
-        teacher_label = "Teacher:"
-        subject_label = "Subject:"
-        course_label = "Class:"
-        level_label = "Level:"
-
-        worksheet.write('A1', teacher_label, border_format)
-        worksheet.write('B1', teacher, border_format)
-        worksheet.write('A2', subject_label, border_format)
-        worksheet.write('B2', subject, border_format)
-        worksheet.write('A3', course_label, border_format)
-        worksheet.write('B3', course, border_format)
-        worksheet.write('A4', level_label, border_format)
-        worksheet.write('B4', level, border_format)
-        timestamp = datetime.now().strftime("%y-%m-%d")
-        worksheet.write('A5', timestamp, border_format)
-
-        # Write headers with appropriate formatting
-        for col_num, value in enumerate(df_final.columns):
-            if value.startswith("Average "):  # Space important to avoid false matches
-                worksheet.write(6, col_num, value, avg_header_format)
-            elif value == final_grade_col:
-                worksheet.write(6, col_num, value, final_grade_format)
-            else:
-                worksheet.write(6, col_num, value, header_format)
-
-        # Apply formatting to data cells
-        average_columns = [col for col in df_final.columns
-                           if col.startswith("Average ")]  # Space important
-
-        for col_name in df_final.columns:
-            col_idx = df_final.columns.get_loc(col_name)
-            for row_idx in range(7, 7 + len(df_final)):
-                value = df_final_filled.iloc[row_idx-7, col_idx]
-                if col_name in average_columns:
-                    worksheet.write(row_idx, col_idx, value, avg_data_format)
-                elif col_name == final_grade_col:
-                    worksheet.write(row_idx, col_idx, value, final_grade_format)
-                else:
-                    worksheet.write(row_idx, col_idx, value, border_format)
-
-        # Adjust column widths.
-        final_grade_col_name = "Final Grade"
-        for idx, col_name in enumerate(df_final.columns):
-            if any(term in col_name.lower() for term in name_terms):
-                worksheet.set_column(idx, idx, 25)
-            elif col_name.startswith("Average"):
-                worksheet.set_column(idx, idx, 7)
-            elif col_name == final_grade_col_name:
-                worksheet.set_column(idx, idx, 12)  # Wider column for final grade
-            else:
-                worksheet.set_column(idx, idx, 5)
-
-        num_rows = df_final.shape[0]
-        num_cols = df_final.shape[1]
-        data_start_row = 6
-        data_end_row = 6 + num_rows
-        worksheet.conditional_format(data_start_row, 0, data_end_row, num_cols - 1, {
-            'type': 'formula',
-            'criteria': '=TRUE',
-            'format': border_format
-        })
-    output.seek(0)
+    
+    with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'nan_inf_to_errors': True}}) as writer:
+        # Find all unique trimester numbers in the columns
+        trimester_numbers = sorted(list(set(re.findall(r'Term(\d+)\s-', " ".join(df.columns)))))
+        
+        if not trimester_numbers:
+            st.error("Could not find any trimester data in the uploaded file.")
+            return None
+            
+        for trimester in trimester_numbers:
+            st.info(f"Processing data for Trimester {trimester}...")
+            process_trimester_data(df, writer, trimester, teacher, subject, course, level)
+            
     return output
 
-def main():
-    st.title("Griffin CSV to Excel")
+# --- Streamlit App ---
 
-    # Display input fields with English labels.
-    teacher = st.text_input("Enter teacher's name:")
-    subject = st.text_input("Enter subject area:")
-    course = st.text_input("Enter class:")
-    level = st.text_input("Enter level:")
-    uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
+st.title("📊 Schoology Gradebook Analyzer")
+st.write("Upload a Schoology gradebook CSV to generate a formatted Excel report.")
 
-    if uploaded_file is not None:
-        try:
-            df = pd.read_csv(uploaded_file)
-            output_excel = process_data(df, teacher, subject, course, level)
-            download_label = "Download Organized Gradebook (Excel)"
-            success_msg = "Processing completed!"
-            st.download_button(
-                label=download_label,
-                data=output_excel,
-                file_name="final_cleaned_gradebook.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            st.success(success_msg)
-        except Exception as e:
-            error_msg = f"An error occurred: {e}"
-            st.error(error_msg)
+uploaded_file = st.file_uploader("Upload a Schoology Gradebook CSV", type="csv")
 
-if __name__ == "__main__":
-    main()
+if uploaded_file:
+    try:
+        df = pd.read_csv(uploaded_file)
+        
+        with st.form("form"):
+            st.subheader("Teacher/Class Info")
+            teacher = st.text_input("Teacher Name")
+            subject = st.text_input("Subject")
+            course = st.text_input("Class/Course Name")
+            level = st.text_input("Level or Grade")
+            submitted = st.form_submit_button("Generate Grade Report")
+
+        if submitted:
+            result = process_all_trimesters(df, teacher, subject, course, level)
+            if result:
+                st.success("✅ Grade report generated successfully!")
+                st.download_button(
+                    label="📥 Download Excel Report",
+                    data=result.getvalue(),
+                    file_name=f"{subject}_{course}_grades.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
+        st.write("Please check if the uploaded file is a valid Schoology gradebook CSV.")
