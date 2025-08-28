@@ -135,7 +135,7 @@ def process_data(df, teacher, subject, course, level, trimester_choice):
         names = [d['new_name'] for d in grp]
         
         # --- DYNAMIC LOGIC: Use pre-calculated category score based on trimester choice ---
-        category_score_col = f"{trimester_choice}- 2025 - {cat} - Category Score"
+        category_score_col = f"{trimester_choice} - 2025 - {cat} - Category Score"
         
         raw_avg = pd.Series(dtype='float64')
         if category_score_col in df.columns:
@@ -170,7 +170,7 @@ def process_data(df, teacher, subject, course, level, trimester_choice):
     df_final = df_cleaned[final_order]
 
     # --- DYNAMIC LOGIC: Use a dynamic column for final grade ---
-    final_grade_col = f"{trimester_choice}- 2025"
+    final_grade_col = f"{trimester_choice} - 2025"
     if final_grade_col in df.columns:
         df_final["Final Grade"] = df[final_grade_col]
     else:
