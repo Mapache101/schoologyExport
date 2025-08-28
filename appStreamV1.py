@@ -77,7 +77,7 @@ def create_single_trimester_gradebook(df, trimester_to_keep):
 
     return filtered_df
 
-def process_data(df, teacher, subject, course, level):
+def process_data(df, teacher, subject, course, level, trimester_choice):
     columns_to_drop = [
         "Nombre de usuario", "Username", "Promedio General",
         "Unique User ID", "2025", "Term3 - 2025"
@@ -134,16 +134,13 @@ def process_data(df, teacher, subject, course, level):
         grp = sorted(groups[cat], key=lambda x: x['seq_num'])
         names = [d['new_name'] for d in grp]
         
-        # --- NEW LOGIC: Use pre-calculated category score instead of summing individual assignments ---
-        # Find the specific category score column name
-        category_score_col = f"Term2- 2025 - {cat} - Category Score"
+        # --- DYNAMIC LOGIC: Use pre-calculated category score based on trimester choice ---
+        category_score_col = f"{trimester_choice}- 2025 - {cat} - Category Score"
         
-        raw_avg = pd.Series(dtype='float64') # Initialize an empty Series
+        raw_avg = pd.Series(dtype='float64')
         if category_score_col in df.columns:
-            # Use the pre-calculated score from the original dataframe
             raw_avg = pd.to_numeric(df[category_score_col], errors='coerce')
         else:
-            # Fallback to the original method if column is not found
             numeric = df_cleaned[names].apply(pd.to_numeric, errors='coerce')
             sum_earned = numeric.sum(axis=1, skipna=True)
             max_points_df = pd.DataFrame(index=df_cleaned.index)
@@ -155,7 +152,7 @@ def process_data(df, teacher, subject, course, level):
             raw_avg = (sum_earned / sum_possible) * 100
         
         raw_avg = raw_avg.fillna(0)
-        # --- END NEW LOGIC ---
+        # --- END DYNAMIC LOGIC ---
             
         wt = None
         for key in weights:
@@ -172,9 +169,13 @@ def process_data(df, teacher, subject, course, level):
     final_order = general_reordered + final_coded
     df_final = df_cleaned[final_order]
 
-    # --- NEW LOGIC: Use "Term2- 2025" column for final grade ---
-    df_final["Final Grade"] = df["Term2- 2025"]
-    # --- END NEW LOGIC ---
+    # --- DYNAMIC LOGIC: Use a dynamic column for final grade ---
+    final_grade_col = f"{trimester_choice}- 2025"
+    if final_grade_col in df.columns:
+        df_final["Final Grade"] = df[final_grade_col]
+    else:
+        df_final["Final Grade"] = pd.NA
+    # --- END DYNAMIC LOGIC ---
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter',
@@ -253,7 +254,6 @@ if uploaded_file:
     st.success("File uploaded successfully!")
     st.subheader("Select Trimester to Process")
     
-    # Dropdown menu to select the trimester
     trimester_choice = st.selectbox(
         "Choose the trimester you want to process:",
         ("Term1", "Term2", "Term3")
@@ -268,12 +268,10 @@ if uploaded_file:
         submitted = st.form_submit_button("Generate Grade Report")
 
     if submitted:
-        # Step 1: Filter the DataFrame to keep only the selected trimester's columns
         filtered_df = create_single_trimester_gradebook(df, trimester_choice)
 
         if filtered_df is not None:
-            # Step 2: Process the filtered DataFrame
-            result = process_data(filtered_df, teacher, subject, course, level)
+            result = process_data(filtered_df, teacher, subject, course, level, trimester_choice)
             st.success("✅ Grade report generated!")
 
             st.download_button(
