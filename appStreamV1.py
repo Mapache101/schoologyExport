@@ -141,15 +141,20 @@ def process_data(df, teacher, subject, course, level, trimester_choice):
         if category_score_col in df.columns:
             raw_avg = pd.to_numeric(df[category_score_col], errors='coerce')
         else:
-            numeric = df_cleaned[names].apply(pd.to_numeric, errors='coerce')
-            sum_earned = numeric.sum(axis=1, skipna=True)
-            max_points_df = pd.DataFrame(index=df_cleaned.index)
-            for d in grp:
-                col = d['new_name']
-                max_pts = d['max_points']
-                max_points_df[col] = numeric[col].notna().astype(float) * max_pts
-            sum_possible = max_points_df.sum(axis=1, skipna=True)
-            raw_avg = (sum_earned / sum_possible) * 100
+            # Fallback for columns with no space
+            category_score_col_no_space = f"{trimester_choice}- 2025 - {cat} - Category Score"
+            if category_score_col_no_space in df.columns:
+                raw_avg = pd.to_numeric(df[category_score_col_no_space], errors='coerce')
+            else:
+                numeric = df_cleaned[names].apply(pd.to_numeric, errors='coerce')
+                sum_earned = numeric.sum(axis=1, skipna=True)
+                max_points_df = pd.DataFrame(index=df_cleaned.index)
+                for d in grp:
+                    col = d['new_name']
+                    max_pts = d['max_points']
+                    max_points_df[col] = numeric[col].notna().astype(float) * max_pts
+                sum_possible = max_points_df.sum(axis=1, skipna=True)
+                raw_avg = (sum_earned / sum_possible) * 100
         
         raw_avg = raw_avg.fillna(0)
         # --- END DYNAMIC LOGIC ---
@@ -171,8 +176,12 @@ def process_data(df, teacher, subject, course, level, trimester_choice):
 
     # --- DYNAMIC LOGIC: Use a dynamic column for final grade ---
     final_grade_col = f"{trimester_choice} - 2025"
+    final_grade_col_no_space = f"{trimester_choice}- 2025"
+
     if final_grade_col in df.columns:
         df_final["Final Grade"] = df[final_grade_col]
+    elif final_grade_col_no_space in df.columns:
+        df_final["Final Grade"] = df[final_grade_col_no_space]
     else:
         df_final["Final Grade"] = pd.NA
     # --- END DYNAMIC LOGIC ---
