@@ -9,8 +9,7 @@ import math
 # Define weights for categories
 weights = {
     "Auto eval": 0.05,
-    "TO BE_SER": 0.05,
-    "TO DECIDE_DECIDIR": 0.05,
+    "TO BE_SER": 0.1,
     "TO DO_HACER": 0.40,
     "TO KNOW_SABER": 0.45
 }
@@ -135,14 +134,14 @@ def process_data(df, teacher, subject, course, level, trimester_choice):
         names = [d['new_name'] for d in grp]
         
         # --- DYNAMIC LOGIC: Use pre-calculated category score based on trimester choice ---
-        category_score_col = f"{trimester_choice} - 2025 - {cat} - Category Score"
+        category_score_col = f"{trimester_choice} - 2026 - {cat} - Category Score"
         
         raw_avg = pd.Series(dtype='float64')
         if category_score_col in df.columns:
             raw_avg = pd.to_numeric(df[category_score_col], errors='coerce')
         else:
             # Fallback for columns with no space
-            category_score_col_no_space = f"{trimester_choice}- 2025 - {cat} - Category Score"
+            category_score_col_no_space = f"{trimester_choice}- 2026 - {cat} - Category Score"
             if category_score_col_no_space in df.columns:
                 raw_avg = pd.to_numeric(df[category_score_col_no_space], errors='coerce')
             else:
@@ -175,8 +174,8 @@ def process_data(df, teacher, subject, course, level, trimester_choice):
     df_final = df_cleaned[final_order]
 
     # --- DYNAMIC LOGIC: Use a dynamic column for final grade ---
-    final_grade_col = f"{trimester_choice} - 2025"
-    final_grade_col_no_space = f"{trimester_choice}- 2025"
+    final_grade_col = f"{trimester_choice} - 2026"
+    final_grade_col_no_space = f"{trimester_choice}- 2026"
 
     if final_grade_col in df.columns:
         df_final["Final Grade"] = df[final_grade_col]
@@ -253,7 +252,7 @@ def process_data(df, teacher, subject, course, level, trimester_choice):
 
 # --- Streamlit App ---
 
-st.title("📊 Schoology Gradebook Analyzer")
+st.title("📊 Schoology Gradebook Analyzer 2026")
 
 uploaded_file = st.file_uploader("Upload a Schoology Gradebook CSV", type="csv")
 
