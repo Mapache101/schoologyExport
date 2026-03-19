@@ -79,7 +79,7 @@ def create_single_trimester_gradebook(df, trimester_to_keep):
 def process_data(df, teacher, subject, course, level, trimester_choice):
     columns_to_drop = [
         "Nombre de usuario", "Username", "Promedio General",
-        "Unique User ID", "2025", "Term3 - 2025"
+        "Unique User ID", "2026", "Term3 - 2025"
     ]
     df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
 
