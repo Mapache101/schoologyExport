@@ -174,13 +174,17 @@ def process_data(df, teacher, subject, course, level, trimester_choice):
     df_final = df_cleaned[final_order]
 
     # --- DYNAMIC LOGIC: Use a dynamic column for final grade ---
-    final_grade_col = f"{trimester_choice} - 2026"
-    final_grade_col_no_space = f"{trimester_choice}- 2026"
-
-    if final_grade_col in df.columns:
-        df_final["Final Grade"] = df[final_grade_col]
-    elif final_grade_col_no_space in df.columns:
-        df_final["Final Grade"] = df[final_grade_col_no_space]
+    # First, check for the new 2026 format where the column is just "Term1", "Term2", etc.
+    if trimester_choice in df.columns:
+        df_final["Final Grade"] = df[trimester_choice]
+        
+    # Keep the old formats as fallbacks just in case you process an older file
+    elif f"{trimester_choice} - 2026" in df.columns:
+        df_final["Final Grade"] = df[f"{trimester_choice} - 2026"]
+    elif f"{trimester_choice}- 2026" in df.columns:
+        df_final["Final Grade"] = df[f"{trimester_choice}- 2026"]
+        
+    # If none of the above exist, leave it blank
     else:
         df_final["Final Grade"] = pd.NA
     # --- END DYNAMIC LOGIC ---
