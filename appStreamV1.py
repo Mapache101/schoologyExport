@@ -192,7 +192,7 @@ def process_data(df, teacher, subject, course, level, trimester_choice):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter',
                         engine_kwargs={'options': {'nan_inf_to_errors': True}}) as writer:
-        df_final.to_excel(writer, 'Sheet1', startrow=6, index=False)
+        df_final.to_excel(writer, sheet_name='Sheet1', startrow=6, index=False)
         wb = writer.book
         ws = writer.sheets['Sheet1']
 
